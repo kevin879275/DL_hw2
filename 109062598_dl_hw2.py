@@ -11,6 +11,10 @@ labelFile = 'label.npy'
 Epoch = 30
 BATCH_SIZE = 4
 
+'''
+Create WaferMapDataset
+'''
+
 
 class WaferMapDataset(Dataset):
     def __init__(self, transform=None):
@@ -47,9 +51,6 @@ transform = transforms.Compose([
     transforms.ToTensor(),
 ])
 
-'''
-Create Dataset
-'''
 train_set = WaferMapDataset(transform=transform)
 
 '''
@@ -110,8 +111,8 @@ for epoch in range(Epoch):
     for imgs, label in train_loader:
         optimizer.zero_grad()
         out = model(imgs)
-        out_np = out.detach().numpy()
-        out_np = out_np[0].reshape(26, 26, 3)
+        # out_np = out.detach().numpy()
+        # out_np = out_np[0].reshape(26, 26, 3)
         loss_val = loss(out, imgs)
         total_loss += loss_val
         loss_val.backward()
@@ -129,23 +130,30 @@ test_loader = DataLoader(dataset=test_set, batch_size=1, shuffle=False)
 classes = []
 test_data_res = []
 test_label_res = []
+# generate five image per data
 num_of_gen = 5
 
 for imgs, label in test_loader:
+    # if this label image not shown
     if int(label[0]) not in classes:
+        # save label if shown
         classes.append(int(label[0]))
+        # show original image
         plt.figure()
         plt.subplot(1, 6, 1)
         imgs_np = imgs.detach().numpy()
         imgs_show = imgs_np[0].transpose((1, 2, 0))
+        # show image with (max value of dim channel)
         plt.imshow(np.argmax(imgs_show, axis=2))
         for i in range(num_of_gen):
+            # add noise
             imgs_noise = imgs + torch.normal(mean=0, std=0.1, size=imgs.size())
-            out = model(imgs_noise)
+            out = model(imgs)
             out_np = out.detach().numpy()
             out_np = out_np[0].transpose((1, 2, 0))
             test_data_res.append(out_np)
             test_label_res.append(label)
+            # show generate image
             plt.subplot(1, 6, i + 2)
             plt.imshow(np.argmax(out_np, axis=2))
         plt.show()
