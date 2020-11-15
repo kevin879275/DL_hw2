@@ -8,8 +8,8 @@ import matplotlib.pyplot as plt
 
 dataFile = 'data.npy'
 labelFile = 'label.npy'
-Epoch = 50
-BATCH_SIZE = 2
+Epoch = 30
+BATCH_SIZE = 4
 
 
 class WaferMapDataset(Dataset):
@@ -40,66 +40,67 @@ class WaferMapDataset(Dataset):
         return len(self.data)
 
 
+'''
+Initial data transform
+'''
 transform = transforms.Compose([
     transforms.ToTensor(),
 ])
 
+'''
+Create Dataset
+'''
 train_set = WaferMapDataset(transform=transform)
 
+'''
+Create DataLoader with batch_size and shuffle
+'''
 train_loader = DataLoader(
     dataset=train_set, batch_size=BATCH_SIZE, shuffle=True)
 
-
-# class Encoder(nn.Module):
-#     def __init__(self):
-#         super(Encoder, self).__init__()
-#         self.conv1 = nn.Conv2d(3, 32, 1)
-#         self.maxpool = nn.MaxPool2d(2, 2, return_indices=True)
-#         self.conv2 = nn.Conv2d(32, 32, 1)
-
-#     def forward(self, x):
-#         x = self.conv1(x)
-#         x, index1 = self.maxpool(x)
-#         x,
-
-
-# class Decoder(nn.Module):
-#     def __init__(self):
-#         pass
-
-#     def forward(self, x):
-#         pass
+'''
+Autoencoder network architecture
+'''
 
 
 class AutoEncoder(nn.Module):
     def __init__(self):
         super(AutoEncoder, self).__init__()
-        self.conv1 = nn.Conv2d(3, 32, 2)
+        self.conv1 = nn.Conv2d(3, 32, 2, padding=1)
         self.maxpool = nn.MaxPool2d(2, 2, return_indices=True)
-        self.conv2 = nn.Conv2d(32, 64, 2)
-        self.deconv1 = nn.ConvTranspose2d(64, 32, 2)
-        self.deconv2 = nn.ConvTranspose2d(32, 3, 2)
+        self.conv2 = nn.Conv2d(32, 16, 2, padding=1)
+        self.deconv1 = nn.ConvTranspose2d(16, 32, 2, padding=1)
+        self.deconv2 = nn.ConvTranspose2d(32, 3, 2, padding=1)
         self.unpool = nn.MaxUnpool2d(2, 2)
-        self.upsample = nn.Upsample(scale_factor=2)
+        #self.upsample = nn.Upsample(scale_factor=2)
         self.relu = nn.ReLU()
+        self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
-        x_conv = self.relu(self.conv1(x))
+        x_conv = self.sigmoid(self.conv1(x))
         x, index1 = self.maxpool(x_conv)
-        x1 = self.relu(self.conv2(x))
+        #Norm1 = nn.BatchNorm2d(x.shape[1])
+        #x = Norm1(x)
+        x1 = self.sigmoid(self.conv2(x))
         latent_code, index2 = self.maxpool(x1)
-        #y = self.upsample(latent_code)
+        #Norm2 = nn.BatchNorm2d(latent_code.shape[1])
+        #latent_code = Norm2(latent_code)
         y = self.unpool(latent_code, index2, output_size=x1.size())
-        y = self.relu(self.deconv1(y))
+        y = self.sigmoid(self.deconv1(y))
         y = self.unpool(y, index1, output_size=x_conv.size())
-        #y = self.upsample(y)
-        out = self.relu(self.deconv2(y))
+        out = self.sigmoid(self.deconv2(y))
         return out
 
 
 model = AutoEncoder()
 print(model)
+'''
+using MSE loss function
+'''
 loss = nn.MSELoss()
+'''
+Using AdamW optimizer with learning rate = 0.01
+'''
 optimizer = torch.optim.AdamW(model.parameters(), lr=0.01)
 
 print("----------- training start -----------")
@@ -121,11 +122,45 @@ for epoch in range(Epoch):
 
 print("------------ test start ---------------")
 
-for imgs, label in train_loader:
-    out = model(imgs)
-    out_np = out.detach().numpy()
-    out_np = out_np[0].transpose((2, 1, 0))
-    plt.imshow(np.argmax(out_np, axis=2))
-    # plt.imshow(out_np)
-    plt.show()
-    break
+
+test_set = WaferMapDataset(transform=transform)
+test_loader = DataLoader(dataset=test_set, batch_size=1, shuffle=False)
+
+classes = []
+test_data_res = []
+test_label_res = []
+num_of_gen = 5
+
+for imgs, label in test_loader:
+    if int(label[0]) not in classes:
+        classes.append(int(label[0]))
+        plt.figure()
+        plt.subplot(1, 6, 1)
+        imgs_np = imgs.detach().numpy()
+        imgs_show = imgs_np[0].transpose((1, 2, 0))
+        plt.imshow(np.argmax(imgs_show, axis=2))
+        for i in range(num_of_gen):
+            imgs_noise = imgs + torch.normal(mean=0, std=0.1, size=imgs.size())
+            out = model(imgs_noise)
+            out_np = out.detach().numpy()
+            out_np = out_np[0].transpose((1, 2, 0))
+            test_data_res.append(out_np)
+            test_label_res.append(label)
+            plt.subplot(1, 6, i + 2)
+            plt.imshow(np.argmax(out_np, axis=2))
+        plt.show()
+    else:
+        for i in range(num_of_gen):
+            imgs_noise = imgs + torch.normal(mean=0, std=0.1, size=imgs.size())
+            out = model(imgs_noise)
+            out_np = out.detach().numpy()
+            out_np = out_np[0].transpose((1, 2, 0))
+            test_data_res.append(out_np)
+            test_label_res.append(label)
+
+
+'''
+save result into .npy file
+'''
+np.save('test_data_result.npy', test_data_res)
+np.save('test_label_result.npy', test_label_res)
