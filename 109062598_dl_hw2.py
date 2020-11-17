@@ -5,11 +5,15 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms as transforms
 import matplotlib.pyplot as plt
+from torchsummary import summary
+
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 dataFile = 'data.npy'
 labelFile = 'label.npy'
-Epoch = 30
-BATCH_SIZE = 4
+Epoch = 20
+BATCH_SIZE = 32
 
 '''
 Create WaferMapDataset
@@ -67,34 +71,30 @@ Autoencoder network architecture
 class AutoEncoder(nn.Module):
     def __init__(self):
         super(AutoEncoder, self).__init__()
-        self.conv1 = nn.Conv2d(3, 32, 2, padding=1)
+        self.conv1 = nn.Conv2d(3, 64, 2, padding=1)
         self.maxpool = nn.MaxPool2d(2, 2, return_indices=True)
-        self.conv2 = nn.Conv2d(32, 16, 2, padding=1)
-        self.deconv1 = nn.ConvTranspose2d(16, 32, 2, padding=1)
-        self.deconv2 = nn.ConvTranspose2d(32, 3, 2, padding=1)
+        self.conv2 = nn.Conv2d(64, 16, 2, padding=1)
+        self.deconv1 = nn.ConvTranspose2d(16, 64, 2, padding=1)
+        self.deconv2 = nn.ConvTranspose2d(64, 3, 2, padding=1)
         self.unpool = nn.MaxUnpool2d(2, 2)
-        #self.upsample = nn.Upsample(scale_factor=2)
         self.relu = nn.ReLU()
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
-        x_conv = self.sigmoid(self.conv1(x))
+        x_conv = self.relu(self.conv1(x))
         x, index1 = self.maxpool(x_conv)
-        #Norm1 = nn.BatchNorm2d(x.shape[1])
-        #x = Norm1(x)
-        x1 = self.sigmoid(self.conv2(x))
+        x1 = self.relu(self.conv2(x))
         latent_code, index2 = self.maxpool(x1)
-        #Norm2 = nn.BatchNorm2d(latent_code.shape[1])
-        #latent_code = Norm2(latent_code)
         y = self.unpool(latent_code, index2, output_size=x1.size())
-        y = self.sigmoid(self.deconv1(y))
+        y = self.relu(self.deconv1(y))
         y = self.unpool(y, index1, output_size=x_conv.size())
-        out = self.sigmoid(self.deconv2(y))
+        out = self.relu(self.deconv2(y))
         return out
 
 
-model = AutoEncoder()
-print(model)
+model = AutoEncoder().to(device)
+# print(model)
+summary(model, (3, 26, 26))
 '''
 using MSE loss function
 '''
@@ -105,10 +105,13 @@ Using AdamW optimizer with learning rate = 0.01
 optimizer = torch.optim.AdamW(model.parameters(), lr=0.01)
 
 print("----------- training start -----------")
+loss_val_list = []
 for epoch in range(Epoch):
     total_loss = 0
     loss_val = 0
     for imgs, label in train_loader:
+        imgs = imgs.to(device)
+        label = label.to(device)
         optimizer.zero_grad()
         out = model(imgs)
         # out_np = out.detach().numpy()
@@ -117,9 +120,15 @@ for epoch in range(Epoch):
         total_loss += loss_val
         loss_val.backward()
         optimizer.step()
+    loss_val_list.append(total_loss.item() / len(train_loader))
     print("epoch  = ", epoch + 1, "loss  = ",
           total_loss.item() / len(train_loader))
-
+# draw loss value per epoch
+plt.plot(range(1, Epoch + 1), loss_val_list)
+plt.title("loss value")
+plt.ylabel("loss value")
+plt.xlabel("epoch")
+plt.show()
 
 print("------------ test start ---------------")
 
@@ -133,23 +142,32 @@ test_label_res = []
 # generate five image per data
 num_of_gen = 5
 
+# class label
+label_classes = {0: 'Center', 1: 'Dount', 2: 'Edge-Loc', 3: 'Edge-Ring',
+                 4: 'Loc', 5: 'Near-full', 6: 'Random', 7: 'Scratch', 8: 'None'}
+
 for imgs, label in test_loader:
     # if this label image not shown
+    imgs = imgs.to(device)
+    label = label.to(device)
     if int(label[0]) not in classes:
         # save label if shown
         classes.append(int(label[0]))
         # show original image
         plt.figure()
         plt.subplot(1, 6, 1)
-        imgs_np = imgs.detach().numpy()
+        plt.title(label_classes[classes[-1]])
+        imgs_np = imgs.cpu().detach().numpy()
         imgs_show = imgs_np[0].transpose((1, 2, 0))
         # show image with (max value of dim channel)
         plt.imshow(np.argmax(imgs_show, axis=2))
         for i in range(num_of_gen):
             # add noise
-            imgs_noise = imgs + torch.normal(mean=0, std=0.1, size=imgs.size())
-            out = model(imgs)
-            out_np = out.detach().numpy()
+            imgs_noise = imgs + \
+                torch.normal(mean=0, std=0.1, size=imgs.size()).to(device)
+            out = model(imgs_noise)
+            out_np = out.cpu().detach().numpy()
+            # (C,H,W)->(H,W,C) image format
             out_np = out_np[0].transpose((1, 2, 0))
             test_data_res.append(out_np)
             test_label_res.append(label)
@@ -157,11 +175,12 @@ for imgs, label in test_loader:
             plt.subplot(1, 6, i + 2)
             plt.imshow(np.argmax(out_np, axis=2))
         plt.show()
-    else:
+    else:  # other result without show image
         for i in range(num_of_gen):
-            imgs_noise = imgs + torch.normal(mean=0, std=0.1, size=imgs.size())
+            imgs_noise = imgs + \
+                torch.normal(mean=0, std=0.1, size=imgs.size()).to(device)
             out = model(imgs_noise)
-            out_np = out.detach().numpy()
+            out_np = out.cpu().detach().numpy()
             out_np = out_np[0].transpose((1, 2, 0))
             test_data_res.append(out_np)
             test_label_res.append(label)
